@@ -3,15 +3,10 @@ from pydantic import BaseModel
 import xgboost as xgb
 import numpy as np
 import pickle
-import warnings
-
+from contextlib import asynccontextmanager
 import base64
 from PIL import Image
 import io
-
-warnings.simplefilter(action='ignore', category=DeprecationWarning)
-
-app = FastAPI()
 
 class PredictionResponse(BaseModel):
     prediction: float
@@ -24,16 +19,27 @@ def load_model():
     with open("models/xgboost.pkl", "rb") as f:
         xgb_model_carregado = pickle.load(f)
 
-@app.on_event("startup")
-async def startup_event():
-    load_model()
+ml_models = {}
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    ml_models["xgboost"] = load_model()
+    yield
+    ml_models.clear()
+
+app = FastAPI(lifespan=lifespan)
+
+@app.get("/predict")
+async def predict(x: float):
+    result = ml_models["xgboost"](x)
+    return {"result": result}
 
 # Endpoint de Healthcheck
 @app.get("/healthcheck")
 async def healthcheck():
     return {"status": "ok"}
 
-################# DEFINICAO ENDPOINT #################
+################# DEFINICAO ENDPOINT PRINCIPAL #################
 @app.post("/predict", response_model=PredictionResponse)
 async def predict(request: ImageRequest):
     img_bytes = base64.b64decode(request.image)
